@@ -54,23 +54,8 @@ function onDatagram(data, rinfo) {
                     timers[key] = [];
                 }
                 timers[key].push(Number(fields[0] || 0));
-            } else if (unit == "c") {
-                if (fields[2]) {
-                    sampleRate = 0;
-                    if (fields[2].match(/^@([\d\.]+)/)) {
-                        sampleRate = Number(fields[2].match(/^@([\d\.]+)/)[1]);
-                    }
-                    if (sampleRate <= 0) {
-                        sys.log('Bad rate: ' + fields);
-                        continue;
-                    }
-                }
-                if (! counters[key]) {
-                    counters[key] = 0;
-                }
-                counters[key] += Number(fields[0] || 1) * (1 / sampleRate);
             }
-            else {  //  empty, %, /s
+            else if (unit == "" || unit == "%" || unit == "/s") {
                 val = Number(fields[0] || 1);
                 if (! stats[key]) {
                     stats[key] = {
@@ -89,6 +74,24 @@ function onDatagram(data, rinfo) {
                     obj.sum = obj.sum + val;
                     obj.sumSq = obj.sumSq + val;
                 }
+            } else if (unit == "c") {
+                if (fields[2]) {
+                    sampleRate = 0;
+                    if (fields[2].match(/^@([\d\.]+)/)) {
+                        sampleRate = Number(fields[2].match(/^@([\d\.]+)/)[1]);
+                    }
+                    if (sampleRate <= 0) {
+                        sys.log('Bad rate: ' + fields);
+                        continue;
+                    }
+                }
+                if (! counters[key]) {
+                    counters[key] = 0;
+                }
+                counters[key] += Number(fields[0] || 1) * (1 / sampleRate);
+            }
+            else {
+                sys.log("Unknown counter unit: " + unit);
             }
         }
     }
@@ -96,7 +99,7 @@ function onDatagram(data, rinfo) {
 
 function flushFunction() {
     var statString = '';
-    var ts = Math.round(new Date().getTime() / 1000);
+    var ts = Math.floor(new Date().getTime() / 1000);
     var numStats = 0;
     var key;
 
@@ -112,11 +115,11 @@ function flushFunction() {
 
     for (key in stats) {
         var obj = stats[key];
-        var message = 'stats.' + key + ".avg" + ' ' + obj.sum / obj.n + " " + ts + "\n";
+        var message = 'stats.' + key + ".avg" + ' ' + (obj.sum / obj.n) + " " + ts + "\n";
         message += 'stats.' + key + ".min" + ' ' + obj.min + " " + ts + "\n";
         message += 'stats.' + key + ".max" + ' ' + obj.max + " " + ts + "\n";
         message += 'stats_counts.' + key + " " + obj.sum + " " + ts + "\n";
-        if (obj.n > 1) {
+        if (obj.n > 2) {
             var sdev = Math.sqrt((obj.n * obj.sumSq - obj.sum * obj.sum) / (obj.n * (obj.n - 1)));
             message += "stats." + key + ".sdev" + " " + sdev + " " + ts + "\n";
         }
@@ -166,6 +169,9 @@ function flushFunction() {
     }
 
     statString += 'statsd.numStats ' + numStats + ' ' + ts + "\n";
+    if (config.debug) {
+        sys.log('sending stats: ' + statString);
+    }
 
     try {
         var graphite = net.createConnection(config.graphitePort, config.graphiteHost);
